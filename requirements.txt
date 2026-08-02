@@ -1,0 +1,4 @@
+streamlit
+spotipy
+discogs_client
+pandas
