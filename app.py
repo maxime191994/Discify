@@ -28,46 +28,25 @@ with st.sidebar:
     discogs_token = st.text_input("Discogs Personal Access Token", value=dc_token_default, type="password", key="dc_token")
     discogs_username = st.text_input("Nom d'utilisateur Discogs", value=dc_user_default, key="dc_user")
 
-# --- CHARGEMENT SPOTIFY SANS BLOCAGE BROWSER ---
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_artist_top_or_playlist(sp_id, sp_secret, artist_or_playlist_id):
-    """Connexion directe sans popup OAuth pour éviter les freeze sur le cloud."""
-    auth_manager = SpotifyClientCredentials(client_id=sp_id, client_secret=sp_secret)
-    sp = spotipy.Spotify(auth_manager=auth_manager)
-    
-    # Récupération via l'API Spotify directe
-    results = sp.playlist_tracks(artist_or_playlist_id, limit=50)
-    tracks = []
-    for item in results.get('items', []):
-        t = item.get('track')
-        if t:
-            tracks.append({
-                'id': t['id'],
-                'title': t['name'],
-                'artist': t['artists'][0]['name'],
-                'album': t['album']['name'],
-                'cover': t['album']['images'][0]['url'] if t['album']['images'] else None
-            })
-    return tracks
-
-# Mode manuel si OAuth bloque
+# --- CONTENU PRINCIPAL ---
 if not (spotify_client_id and spotify_client_secret and discogs_token and discogs_username):
     st.info("👈 Renseigne tes identifiants dans la barre latérale ou les Secrets Streamlit pour démarrer.")
 else:
     try:
-        # Initialisation rapide
+        # Initialisation du client Spotify sans OAuth interactif
         auth_manager = SpotifyClientCredentials(client_id=spotify_client_id, client_secret=spotify_client_secret)
         sp = spotipy.Spotify(auth_manager=auth_manager)
         d_client = discogs_client.Client('DiscifyApp/1.0', user_token=discogs_token)
 
         st.success("⚡ Connecté à Spotify & Discogs en 1 seconde !")
         
-        # Barre de recherche d'artiste ou d'album direct
+        # Champ de recherche
         search_query = st.text_input("🔎 Recherche une chanson ou un artiste sur Spotify :", "Daft Punk")
         
         if search_query:
             with st.spinner("Recherche Spotify..."):
-                results = sp.search(q=search_query, limit=15, type='track')
+                # Correction du paramètre type (type=['track'])
+                results = sp.search(q=search_query, limit=15, type=['track'])
                 tracks = []
                 for t in results['tracks']['items']:
                     tracks.append({
@@ -80,13 +59,13 @@ else:
 
             st.markdown("---")
 
-            # Affichage rapide
+            # Affichage rapide des morceaux
             for track in tracks:
                 col_cover, col_details = st.columns([1, 4])
                 
                 with col_cover:
                     if track['cover']:
-                        st.image(track['cover'], use_column_width=True)
+                        st.image(track['cover'], use_container_width=True)
                 
                 with col_details:
                     st.markdown(f"### **{track['title']}**")
