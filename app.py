@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("🎵 Discify")
-st.caption("Faites le pont entre vos Titres Likés Spotify et votre Collection / Wantlist Discogs.")
+st.caption("Compare tes Titres Likés Spotify à ta Collection et ta Wantlist Discogs.")
 
 # --- SIDEBAR : CONFIGURATION ET IDENTIFIANTS ---
 with st.sidebar:
@@ -30,60 +30,91 @@ with st.sidebar:
     discogs_token = st.text_input("Personal Access Token", value=dc_token_default, type="password", key="dc_token")
     discogs_username = st.text_input("Nom d'utilisateur Discogs", value=dc_user_default, key="dc_user")
 
-# --- FONCTIONS APIS AVEC CACHE ---
+# --- FONCTIONS AVEC CACHE INTELLIGENT ---
 @st.cache_resource(show_spinner=False)
 def init_discogs(token):
     return discogs_client.Client('DiscifyApp/1.0', user_token=token)
 
-@st.cache_data(ttl=300, show_spinner=False)
-def get_spotify_liked_tracks(_sp):
-    results = _sp.current_user_saved_tracks(limit=50)
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_all_spotify_liked_tracks(sp_id, sp_secret, uri):
+    """Récupère l'intégralité des titres likés (pagination jusqu'à épuisement)."""
+    sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+        client_id=sp_id,
+        client_secret=sp_secret,
+        redirect_uri=uri,
+        scope="user-library-read"
+    ))
+    
     tracks = []
-    for item in results['items']:
-        track = item['track']
-        tracks.append({
-            'id': track['id'],
-            'title': track['name'],
-            'artist': track['artists'][0]['name'],
-            'album': track['album']['name'],
-            'cover': track['album']['images'][0]['url'] if track['album']['images'] else None
-        })
+    offset = 0
+    limit = 50
+    
+    while True:
+        results = sp.current_user_saved_tracks(limit=limit, offset=offset)
+        items = results.get('items', [])
+        if not items:
+            break
+            
+        for item in items:
+            track = item['track']
+            tracks.append({
+                'id': track['id'],
+                'title': track['name'],
+                'artist': track['artists'][0]['name'],
+                'album': track['album']['name'],
+                'cover': track['album']['images'][0]['url'] if track['album']['images'] else None
+            })
+        
+        offset += limit
+        if len(items) < limit:
+            break
+            
     return tracks
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_discogs_collection(_d_client, username):
-    user = _d_client.user(username)
-    collection = set()
-    for item in user.collection_folders[0].releases:
-        release = item.release
-        title_str = f"{release.artists[0].name} - {release.title}".lower()
-        collection.add(title_str)
-    return collection
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_discogs_collection_titles(token, username):
+    """Récupère les 60 albums de la collection Discogs."""
+    try:
+        d = discogs_client.Client('DiscifyApp/1.0', user_token=token)
+        user = d.user(username)
+        collection_titles = set()
+        
+        for item in user.collection_folders[0].releases:
+            rel = item.release
+            # Format de recherche simple : artiste + titre
+            full_title = f"{rel.artists[0].name} - {rel.title}".lower()
+            collection_titles.add(full_title)
+            
+        return collection_titles
+    except Exception:
+        return set()
 
 # --- CONTENU PRINCIPAL ---
 if not (spotify_client_id and spotify_client_secret and discogs_token and discogs_username):
-    st.info("👈 Veuillez renseigner vos identifiants Spotify et Discogs dans le menu de gauche (ou via les Secrets) pour démarrer.")
+    st.info("👈 Renseigne tes identifiants dans la barre latérale ou les Secrets Streamlit pour démarrer.")
 else:
     try:
-        sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-            client_id=spotify_client_id,
-            client_secret=spotify_client_secret,
-            redirect_uri=redirect_uri,
-            scope="user-library-read"
-        ))
-        
-        d_client = init_discogs(discogs_token)
-        
-        # Chargement rapide avec spinner
-        with st.spinner("Chargement ultra-rapide de Spotify & Discogs..."):
-            my_collection = fetch_discogs_collection(d_client, discogs_username)
-            liked_tracks = get_spotify_liked_tracks(sp)
+        # Chargement avec indicateur
+        with st.spinner("Chargement de tes 500 titres Spotify & de ta collection Discogs..."):
+            liked_tracks = get_all_spotify_liked_tracks(spotify_client_id, spotify_client_secret, redirect_uri)
+            my_discogs_collection = get_discogs_collection_titles(discogs_token, discogs_username)
+            d_client = init_discogs(discogs_token)
 
-        st.success(f"Connecté ! {len(liked_tracks)} titres likés chargés.")
+        st.success(f"⚡ Connecté ! {len(liked_tracks)} titres Spotify et {len(my_discogs_collection)} albums Discogs en mémoire.")
+        
+        # Champ de recherche pour filtrer parmi les 500 titres
+        search_filter = st.text_input("🔎 Filtrer tes titres Spotify (par artiste ou chanson) :", "")
+        
+        if search_filter:
+            filtered_tracks = [t for t in liked_tracks if search_filter.lower() in t['title'].lower() or search_filter.lower() in t['artist'].lower()]
+        else:
+            filtered_tracks = liked_tracks[:30] # Affiche les 30 premiers pour un défilement ultra fluide
+            st.caption("Affichage des 30 plus récents. Utilise la barre de recherche ci-dessus pour trouver un titre précis.")
+
         st.markdown("---")
 
-        # Affichage fluide sous forme de liste
-        for track in liked_tracks:
+        # Affichage des cartes de musique
+        for track in filtered_tracks:
             col_cover, col_details = st.columns([1, 4])
             
             with col_cover:
@@ -92,37 +123,37 @@ else:
             
             with col_details:
                 st.markdown(f"### **{track['title']}**")
-                st.markdown(f"**Artiste :** {track['artist']} | **Album Spotify :** *{track['album']}*")
+                st.markdown(f"**Artiste :** {track['artist']} | **Album :** *{track['album']}*")
                 
-                # RECHERCHE À LA DEMANDE (évite de bloquer l'API)
-                if st.button(f"🔍 Chercher les vinyles pour « {track['title']} »", key=f"search_{track['id']}"):
-                    with st.spinner("Recherche des éditions sur Discogs..."):
+                # Bouton de recherche d'édition vinyle sur Discogs
+                if st.button(f"🔍 Chercher l'édition vinyle sur Discogs", key=f"search_{track['id']}"):
+                    with st.spinner("Recherche des pressages..."):
                         search_query = f"{track['artist']} {track['title']}"
                         results = d_client.search(search_query, type='release', format='Vinyl')
                         
                         if not results:
-                            st.warning("Aucun vinyle correspondant trouvé sur Discogs.")
+                            st.warning("Aucun vinyle trouvé sur Discogs pour ce titre.")
                         else:
-                            st.markdown("#### Éditions Vinyles trouvées :")
+                            st.markdown("#### Pressages vinyles disponibles :")
                             for rel in results[:5]:
                                 rel_title = f"{rel.artists[0].name} - {rel.title}"
-                                is_owned = rel_title.lower() in my_collection
-                                year = rel.year if hasattr(rel, 'year') and rel.year else "Année N/A"
+                                is_in_collection = rel_title.lower() in my_discogs_collection
+                                year = rel.year if hasattr(rel, 'year') and rel.year else "N/A"
                                 
                                 c1, c2 = st.columns([3, 1])
                                 with c1:
-                                    if is_owned:
-                                        st.markdown(f"🟢 **{rel_title}** ({year}) — *Déjà dans votre collection*")
+                                    if is_in_collection:
+                                        st.markdown(f"🟢 **{rel_title}** ({year}) — *Déjà dans ta collection !*")
                                     else:
-                                        st.markdown(f"⚪ **{rel_title}** ({year})")
+                                        st.markdown(f"📀 **{rel_title}** ({year})")
                                 
                                 with c2:
-                                    if not is_owned:
-                                        if st.button("➕ Wantlist", key=f"want_{track['id']}_{rel.id}"):
+                                    if not is_in_collection:
+                                        if st.button("➕ Ajout Wantlist", key=f"want_{track['id']}_{rel.id}"):
                                             d_client.user(discogs_username).wantlist.add(rel.id)
-                                            st.toast(f"Ajouté à la Wantlist : {rel.title}")
+                                            st.toast(f"Ajouté à ta Wantlist Discogs : {rel.title}")
 
             st.markdown("---")
 
     except Exception as e:
-        st.error(f"Une erreur s'est produite : {e}")
+        st.error(f"Une erreur s'est produite lors de la connexion : {e}")
