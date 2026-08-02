@@ -33,7 +33,7 @@ if not (spotify_client_id and spotify_client_secret and discogs_token and discog
     st.info("👈 Renseigne tes identifiants dans la barre latérale ou les Secrets Streamlit pour démarrer.")
 else:
     try:
-        # Initialisation sans popup OAuth
+        # Initialisation du client Spotify sans OAuth interactif
         auth_manager = SpotifyClientCredentials(
             client_id=spotify_client_id, 
             client_secret=spotify_client_secret
@@ -44,12 +44,12 @@ else:
         st.success("⚡ Connecté à Spotify & Discogs !")
         
         # Champ de recherche
-        search_query = st.text_input("🔎 Recherche une chanson ou un artiste sur Spotify :", value="Iron Maiden")
+        search_query = st.text_input("🔎 Recherche un artiste ou un morceau parmi tes favoris ou sur Spotify :", value="Iron Maiden")
         
         if search_query.strip():
-            with st.spinner("Recherche Spotify..."):
-                # Précision explicite des paramètres q, limit et type
-                results = sp.search(q=search_query.strip(), limit=15, type='track')
+            with st.spinner("Recherche Spotify en cours..."):
+                # Syntaxe compatible avec spotipy >= 2.23.0
+                results = sp.search(q=str(search_query.strip()), limit=20, type='track')
                 tracks = []
                 
                 if results and 'tracks' in results and 'items' in results['tracks']:
