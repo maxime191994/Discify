@@ -33,7 +33,7 @@ if not (spotify_client_id and spotify_client_secret and discogs_token and discog
     st.info("👈 Renseigne tes identifiants dans la barre latérale ou les Secrets Streamlit pour démarrer.")
 else:
     try:
-        # Client Spotify ClientCredentials sans OAuth interactif
+        # Client Spotify sans OAuth interactif
         auth_manager = SpotifyClientCredentials(
             client_id=spotify_client_id.strip(), 
             client_secret=spotify_client_secret.strip()
@@ -44,18 +44,18 @@ else:
         st.success("⚡ Connecté à Spotify & Discogs !")
         
         # Champ de recherche
-        search_query = st.text_input("🔎 Recherche un artiste ou un morceau sur Spotify :", value="Iron Maiden")
+        search_query = st.text_input("🔎 Recherche un artiste ou un morceau sur Spotify :", value="daft punk")
         
         clean_query = str(search_query).strip()
         
         if clean_query:
             with st.spinner("Recherche Spotify en cours..."):
-                # Précision stricte des types de paramètres pour éviter le HTTP 400
-                results = sp.search(q=clean_query, limit=int(15), type='track')
+                # FIX POUR SPOTIFY HTTP 400 : Utiliser _get directement pour éviter le bug de conversion de Spotipy
+                raw_results = sp._get('search', q=clean_query, type='track', limit=15)
                 tracks = []
                 
-                if results and 'tracks' in results and 'items' in results['tracks']:
-                    for t in results['tracks']['items']:
+                if raw_results and 'tracks' in raw_results and 'items' in raw_results['tracks']:
+                    for t in raw_results['tracks']['items']:
                         tracks.append({
                             'id': t['id'],
                             'title': t['name'],
