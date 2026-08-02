@@ -101,7 +101,6 @@ with st.sidebar:
     sp_secret_default = st.secrets.get("SPOTIFY_CLIENT_SECRET", "") if "SPOTIFY_CLIENT_SECRET" in st.secrets else ""
     sp_redirect_default = st.secrets.get("SPOTIFY_REDIRECT_URI", "") if "SPOTIFY_REDIRECT_URI" in st.secrets else "https://discify-toexmpnkw9kaaajungpqxb.streamlit.app/callback"
     dc_token_default = st.secrets.get("DISCOGS_TOKEN", "") if "DISCOGS_TOKEN" in st.secrets else ""
-    dc_user_default = st.secrets.get("DISCOGS_USERNAME", "") if "DISCOGS_USERNAME" in st.secrets else ""
 
     spotify_client_id = st.text_input("Spotify Client ID", value=sp_id_default, type="password", key="sp_id")
     spotify_client_secret = st.text_input("Spotify Client Secret", value=sp_secret_default, type="password", key="sp_secret")
@@ -112,14 +111,27 @@ with st.sidebar:
         help="Doit être EXACTEMENT la même URL que celle enregistrée dans ton app sur le Spotify Developer Dashboard (ex: https://tonapp.streamlit.app)"
     )
     discogs_token = st.text_input("Discogs Personal Access Token", value=dc_token_default, type="password", key="dc_token")
-    discogs_username = st.text_input("Nom d'utilisateur Discogs", value=dc_user_default, key="dc_user")
 
 # --- CONTENU PRINCIPAL ---
-if not (spotify_client_id and spotify_client_secret and spotify_redirect_uri and discogs_token and discogs_username):
+if not (spotify_client_id and spotify_client_secret and spotify_redirect_uri and discogs_token):
     st.info("👈 Renseigne tes identifiants dans la barre latérale ou les Secrets Streamlit pour démarrer.")
 else:
     try:
         d_client = discogs_client.Client('DiscifyApp/1.0', user_token=discogs_token.strip())
+
+        # Récupère le username Discogs directement depuis le token pour éviter
+        # tout problème de casse (l'API Discogs est sensible à la casse du username)
+        try:
+            discogs_identity = d_client.identity()
+            discogs_username = discogs_identity.username
+        except Exception as ident_err:
+            st.error(
+                "Impossible de vérifier ton identité Discogs avec ce token. "
+                "Vérifie qu'il est valide et non expiré/révoqué "
+                "(régénère-le sur https://www.discogs.com/settings/developers si besoin).\n\n"
+                f"Détail : {ident_err}"
+            )
+            st.stop()
 
         # --- AUTH SPOTIFY (Authorization Code Flow, obligatoire pour lire les titres likés) ---
         auth_manager = SpotifyOAuth(
@@ -158,7 +170,7 @@ else:
 
         sp = spotipy.Spotify(auth=token_info["access_token"])
 
-        st.success("⚡ Connecté à Spotify & Discogs !")
+        st.success(f"⚡ Connecté à Spotify & Discogs (utilisateur : **{discogs_username}**) !")
 
         # --- RÉCUPÉRATION DES TITRES LIKÉS ---
         if "saved_offset" not in st.session_state:
@@ -214,40 +226,60 @@ else:
                     if owned:
                         st.success(f"✅ Tu possèdes déjà un vinyle avec ce titre (release [#{owned_release_id}](https://www.discogs.com/release/{owned_release_id})).")
 
+                    if "discogs_results" not in st.session_state:
+                        st.session_state.discogs_results = {}
+                    if "wantlist_added" not in st.session_state:
+                        st.session_state.wantlist_added = set()
+
                     if st.button("🔍 Chercher le vinyle sur Discogs", key=f"search_{track['id']}"):
                         with st.spinner("Recherche des pressages sur Discogs..."):
                             try:
                                 d_results = d_client.search(f"{track['artist']} {track['title']}", type='release', format='Vinyl')
-                                if not d_results:
-                                    st.warning("Aucun vinyle trouvé sur Discogs.")
-                                else:
-                                    st.markdown("#### Pressages vinyles disponibles :")
-                                    for rel in islice(d_results, 3):
-                                        rel_title = f"{rel.artists[0].name} - {rel.title}"
-                                        year = rel.year if hasattr(rel, 'year') and rel.year else "N/A"
-
-                                        # Vérifie si ce release est déjà dans la collection Discogs
+                                releases = []
+                                for rel in islice(d_results, 3):
+                                    in_collection = False
+                                    try:
+                                        coll_resp = d_client._get(
+                                            f"{d_client._base_url}/users/{discogs_username}/collection/releases/{rel.id}"
+                                        )
+                                        in_collection = bool(coll_resp.get("releases"))
+                                    except Exception:
                                         in_collection = False
-                                        try:
-                                            coll_resp = d_client._get(
-                                                f"{d_client._base_url}/users/{discogs_username.strip()}/collection/releases/{rel.id}"
-                                            )
-                                            in_collection = bool(coll_resp.get("releases"))
-                                        except Exception:
-                                            in_collection = False
-
-                                        c1, c2 = st.columns([3, 1])
-                                        with c1:
-                                            st.markdown(f"📀 **{rel_title}** ({year})")
-                                        with c2:
-                                            if in_collection:
-                                                st.success("✅ Déjà possédé")
-                                            else:
-                                                if st.button("➕ Wantlist", key=f"want_{track['id']}_{rel.id}"):
-                                                    d_client.user(discogs_username.strip()).wantlist.add(rel.id)
-                                                    st.toast(f"Ajouté à la Wantlist : {rel.title}")
+                                    releases.append({
+                                        "id": rel.id,
+                                        "title": f"{rel.artists[0].name} - {rel.title}",
+                                        "year": rel.year if hasattr(rel, 'year') and rel.year else "N/A",
+                                        "in_collection": in_collection,
+                                    })
+                                st.session_state.discogs_results[track['id']] = releases
                             except Exception as err:
                                 st.error(f"Erreur Discogs : {err}")
+
+                    # Rendu des résultats persistés (survit aux reruns déclenchés par le bouton Wantlist)
+                    releases = st.session_state.discogs_results.get(track['id'])
+                    if releases is not None:
+                        if not releases:
+                            st.warning("Aucun vinyle trouvé sur Discogs.")
+                        else:
+                            st.markdown("#### Pressages vinyles disponibles :")
+                            for rel in releases:
+                                c1, c2 = st.columns([3, 1])
+                                with c1:
+                                    st.markdown(f"📀 **{rel['title']}** ({rel['year']})")
+                                with c2:
+                                    added_key = (track['id'], rel['id'])
+                                    if rel["in_collection"]:
+                                        st.success("✅ Déjà possédé")
+                                    elif added_key in st.session_state.wantlist_added:
+                                        st.success("✅ Ajouté à la Wantlist")
+                                    else:
+                                        if st.button("➕ Wantlist", key=f"want_{track['id']}_{rel['id']}"):
+                                            try:
+                                                d_client.user(discogs_username).wantlist.add(rel['id'])
+                                                st.session_state.wantlist_added.add(added_key)
+                                                st.rerun()
+                                            except Exception as err:
+                                                st.error(f"Erreur lors de l'ajout à la Wantlist : {err}")
 
                 st.markdown("---")
 
