@@ -4,6 +4,7 @@ from spotipy.oauth2 import SpotifyOAuth
 from spotipy.cache_handler import MemoryCacheHandler
 import discogs_client
 from itertools import islice
+import re
 
 # Configuration de la page
 st.set_page_config(
@@ -18,13 +19,87 @@ st.caption("Compare tes titres likés Spotify avec ta collection & ta Wantlist D
 
 SPOTIFY_SCOPE = "user-library-read"
 
+
+def normalize(text):
+    """Normalise un texte pour comparaison (minuscule, sans ponctuation/accents superflus)."""
+    if not text:
+        return ""
+    text = text.lower()
+    text = re.sub(r"[’']", "'", text)
+    text = re.sub(r"[^a-z0-9' ]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def artist_in_list(track_artist_norm, item_artists_norm):
+    return any(
+        track_artist_norm == a or track_artist_norm in a or a in track_artist_norm
+        for a in item_artists_norm if a
+    )
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_full_collection(username, token):
+    """Récupère l'intégralité de la collection Discogs de l'utilisateur (dossier 'All')."""
+    d = discogs_client.Client('DiscifyApp/1.0', user_token=token)
+    collection = []
+    page = 1
+    while True:
+        resp = d._get(f"/users/{username}/collection/folders/0/releases?page={page}&per_page=100")
+        for item in resp.get("releases", []):
+            bi = item.get("basic_information", {})
+            collection.append({
+                "release_id": item.get("id"),
+                "title": bi.get("title", ""),
+                "artists": [a.get("name", "") for a in bi.get("artists", [])],
+                "artists_norm": [normalize(a.get("name", "")) for a in bi.get("artists", [])],
+                "title_norm": normalize(bi.get("title", "")),
+            })
+        pagination = resp.get("pagination", {})
+        if page >= pagination.get("pages", 1):
+            break
+        page += 1
+    return collection
+
+
+def check_track_owned(track, collection, token):
+    """Vérifie si un titre liké est déjà possédé : soit le titre du vinyle correspond
+    (single/EP du même nom), soit le titre apparaît dans la tracklist d'un vinyle
+    du même artiste présent dans la collection."""
+    track_title_norm = normalize(track['title'])
+    album_norm = normalize(track['album'])
+    track_artist_norm = normalize(track['artist'])
+
+    artist_matches = [
+        item for item in collection
+        if artist_in_list(track_artist_norm, item["artists_norm"])
+    ]
+
+    # 1. Correspondance rapide par titre (single/EP ou même titre d'album)
+    for item in artist_matches:
+        if item["title_norm"] == track_title_norm or item["title_norm"] == album_norm:
+            return True, item["release_id"]
+
+    # 2. Vérification plus poussée : la tracklist du vinyle contient-elle ce titre ?
+    d = discogs_client.Client('DiscifyApp/1.0', user_token=token)
+    for item in artist_matches[:5]:
+        try:
+            release = d.release(item["release_id"])
+            for t in release.tracklist:
+                if normalize(t.title) == track_title_norm:
+                    return True, item["release_id"]
+        except Exception:
+            continue
+
+    return False, None
+
 # --- SIDEBAR : CONFIGURATION ---
 with st.sidebar:
     st.header("⚙️ Configuration")
 
     sp_id_default = st.secrets.get("SPOTIFY_CLIENT_ID", "") if "SPOTIFY_CLIENT_ID" in st.secrets else ""
     sp_secret_default = st.secrets.get("SPOTIFY_CLIENT_SECRET", "") if "SPOTIFY_CLIENT_SECRET" in st.secrets else ""
-    sp_redirect_default = st.secrets.get("SPOTIFY_REDIRECT_URI", "") if "SPOTIFY_REDIRECT_URI" in st.secrets else ""
+    sp_redirect_default = st.secrets.get("SPOTIFY_REDIRECT_URI", "") if "SPOTIFY_REDIRECT_URI" in st.secrets else "https://discify-toexmpnkw9kaaajungpqxb.streamlit.app/callback"
     dc_token_default = st.secrets.get("DISCOGS_TOKEN", "") if "DISCOGS_TOKEN" in st.secrets else ""
     dc_user_default = st.secrets.get("DISCOGS_USERNAME", "") if "DISCOGS_USERNAME" in st.secrets else ""
 
@@ -117,6 +192,9 @@ else:
         if not st.session_state.saved_tracks:
             st.warning("Aucun titre liké trouvé sur ton compte Spotify.")
         else:
+            with st.spinner("Analyse de ta collection Discogs..."):
+                full_collection = fetch_full_collection(discogs_username.strip(), discogs_token.strip())
+
             for track in st.session_state.saved_tracks:
                 col_cover, col_details = st.columns([1, 4])
 
@@ -125,8 +203,16 @@ else:
                         st.image(track['cover'], use_container_width=True)
 
                 with col_details:
-                    st.markdown(f"### **{track['title']}**")
+                    owned, owned_release_id = check_track_owned(track, full_collection, discogs_token.strip())
+
+                    title_line = f"### **{track['title']}**"
+                    if owned:
+                        title_line += "  🟢 Déjà dans ta collection"
+                    st.markdown(title_line)
                     st.markdown(f"**Artiste :** {track['artist']} | **Album :** *{track['album']}*")
+
+                    if owned:
+                        st.success(f"✅ Tu possèdes déjà un vinyle avec ce titre (release [#{owned_release_id}](https://www.discogs.com/release/{owned_release_id})).")
 
                     if st.button("🔍 Chercher le vinyle sur Discogs", key=f"search_{track['id']}"):
                         with st.spinner("Recherche des pressages sur Discogs..."):
