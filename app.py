@@ -2,6 +2,7 @@ import streamlit as st
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import discogs_client
+from itertools import islice
 
 # Configuration de la page
 st.set_page_config(
@@ -92,7 +93,7 @@ else:
                                         st.warning("Aucun vinyle trouvé sur Discogs.")
                                     else:
                                         st.markdown("#### Pressages vinyles disponibles :")
-                                        for rel in d_results[:3]:
+                                        for rel in islice(d_results, 3):
                                             rel_title = f"{rel.artists[0].name} - {rel.title}"
                                             year = rel.year if hasattr(rel, 'year') and rel.year else "N/A"
                                             
