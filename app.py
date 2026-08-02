@@ -41,15 +41,15 @@ else:
         sp = spotipy.Spotify(auth_manager=auth_manager)
         d_client = discogs_client.Client('DiscifyApp/1.0', user_token=discogs_token)
 
-        st.success("⚡ Connecté à Spotify & Discogs en 1 seconde !")
+        st.success("⚡ Connecté à Spotify & Discogs !")
         
-        # Champ de recherche avec valeur par défaut simple
-        search_query = st.text_input("🔎 Recherche une chanson ou un artiste sur Spotify :", value="Daft Punk")
+        # Champ de recherche
+        search_query = st.text_input("🔎 Recherche une chanson ou un artiste sur Spotify :", value="Iron Maiden")
         
         if search_query.strip():
             with st.spinner("Recherche Spotify..."):
-                # Appel direct et compatible à 100% avec spotipy
-                results = sp.search(q=search_query.strip(), limit=15)
+                # Précision explicite des paramètres q, limit et type
+                results = sp.search(q=search_query.strip(), limit=15, type='track')
                 tracks = []
                 
                 if results and 'tracks' in results and 'items' in results['tracks']:
@@ -67,7 +67,6 @@ else:
             if not tracks:
                 st.warning("Aucun résultat trouvé sur Spotify.")
             else:
-                # Affichage des morceaux
                 for track in tracks:
                     col_cover, col_details = st.columns([1, 4])
                     
