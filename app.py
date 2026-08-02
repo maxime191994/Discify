@@ -45,7 +45,7 @@ def fetch_full_collection(username, token):
     collection = []
     page = 1
     while True:
-        resp = d._get(f"/users/{username}/collection/folders/0/releases?page={page}&per_page=100")
+        resp = d._get(f"{d._base_url}/users/{username}/collection/folders/0/releases?page={page}&per_page=100")
         for item in resp.get("releases", []):
             bi = item.get("basic_information", {})
             collection.append({
@@ -230,7 +230,7 @@ else:
                                         in_collection = False
                                         try:
                                             coll_resp = d_client._get(
-                                                f"/users/{discogs_username.strip()}/collection/releases/{rel.id}"
+                                                f"{d_client._base_url}/users/{discogs_username.strip()}/collection/releases/{rel.id}"
                                             )
                                             in_collection = bool(coll_resp.get("releases"))
                                         except Exception:
