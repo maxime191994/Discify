@@ -33,23 +33,25 @@ if not (spotify_client_id and spotify_client_secret and discogs_token and discog
     st.info("👈 Renseigne tes identifiants dans la barre latérale ou les Secrets Streamlit pour démarrer.")
 else:
     try:
-        # Initialisation du client Spotify sans OAuth interactif
+        # Client Spotify ClientCredentials sans OAuth interactif
         auth_manager = SpotifyClientCredentials(
-            client_id=spotify_client_id, 
-            client_secret=spotify_client_secret
+            client_id=spotify_client_id.strip(), 
+            client_secret=spotify_client_secret.strip()
         )
         sp = spotipy.Spotify(auth_manager=auth_manager)
-        d_client = discogs_client.Client('DiscifyApp/1.0', user_token=discogs_token)
+        d_client = discogs_client.Client('DiscifyApp/1.0', user_token=discogs_token.strip())
 
         st.success("⚡ Connecté à Spotify & Discogs !")
         
         # Champ de recherche
-        search_query = st.text_input("🔎 Recherche un artiste ou un morceau parmi tes favoris ou sur Spotify :", value="Iron Maiden")
+        search_query = st.text_input("🔎 Recherche un artiste ou un morceau sur Spotify :", value="Iron Maiden")
         
-        if search_query.strip():
+        clean_query = str(search_query).strip()
+        
+        if clean_query:
             with st.spinner("Recherche Spotify en cours..."):
-                # Syntaxe compatible avec spotipy >= 2.23.0
-                results = sp.search(q=str(search_query.strip()), limit=20, type='track')
+                # Précision stricte des types de paramètres pour éviter le HTTP 400
+                results = sp.search(q=clean_query, limit=int(15), type='track')
                 tracks = []
                 
                 if results and 'tracks' in results and 'items' in results['tracks']:
@@ -95,7 +97,7 @@ else:
                                                 st.markdown(f"📀 **{rel_title}** ({year})")
                                             with c2:
                                                 if st.button("➕ Wantlist", key=f"want_{track['id']}_{rel.id}"):
-                                                    d_client.user(discogs_username).wantlist.add(rel.id)
+                                                    d_client.user(discogs_username.strip()).wantlist.add(rel.id)
                                                     st.toast(f"Ajouté à la Wantlist : {rel.title}")
                                 except Exception as err:
                                     st.error(f"Erreur Discogs : {err}")
