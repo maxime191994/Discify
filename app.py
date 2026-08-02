@@ -50,8 +50,12 @@ else:
         
         if clean_query:
             with st.spinner("Recherche Spotify en cours..."):
-                # FIX POUR SPOTIFY HTTP 400 : Utiliser _get directement pour éviter le bug de conversion de Spotipy
-                raw_results = sp._get('search', q=clean_query, type='track', limit=15)
+                # NOTE : depuis le 9 février 2026, Spotify limite le paramètre `limit`
+                # de l'endpoint /v1/search à 10 maximum pour les apps en Dev Mode
+                # (auparavant 50). Un `limit` supérieur renvoie une erreur 400
+                # "Invalid limit". Voir :
+                # https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide
+                raw_results = sp._get('search', q=clean_query, type='track', limit=10)
                 tracks = []
                 
                 if raw_results and 'tracks' in raw_results and 'items' in raw_results['tracks']:
